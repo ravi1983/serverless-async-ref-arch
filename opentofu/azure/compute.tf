@@ -56,13 +56,6 @@ resource "azurerm_role_assignment" "func_openai_access" {
   principal_id         = azurerm_function_app_flex_consumption.parser_func.identity[0].principal_id
 }
 
-# resource "azurerm_managed_api_connection" "azureblob" {
-#   name                = "azureblob" # This must match your JSON path exactly
-#   resource_group_name = azurerm_resource_group.serverless_rg.name
-#   location            = azurerm_resource_group.serverless_rg.location
-#   managed_api_id      = "/subscriptions/${var.SUBSCRIPTION}/providers/Microsoft.Web/locations/${azurerm_resource_group.serverless_rg.location}/managedApis/azureblob"
-# }
-
 resource "azurerm_logic_app_workflow" "doc_processor" {
   name                = "wf-doc-processor-2026"
   location            = azurerm_resource_group.serverless_rg.location
@@ -73,6 +66,7 @@ resource "azurerm_logic_app_workflow" "doc_processor" {
   }
 }
 
+
 resource "azapi_update_resource" "logic_app_definition" {
   type        = "Microsoft.Logic/workflows@2019-05-01"
   resource_id = azurerm_logic_app_workflow.doc_processor.id
@@ -81,12 +75,12 @@ resource "azapi_update_resource" "logic_app_definition" {
     properties = jsondecode(templatefile("${path.module}/logic-app/workflow.json", {
       sub_id = var.SUBSCRIPTION
       rg = azurerm_resource_group.serverless_rg.name,
+      from_email = "donotreply@${azapi_resource.managed_domain.output.properties.fromSenderDomain}"
       email = var.USER_EMAIL
       location = azurerm_resource_group.serverless_rg.location
     }))
   }
 }
-
 
 resource "azurerm_role_assignment" "logic_app_storage_read" {
   scope                = azurerm_storage_account.source_storage.id

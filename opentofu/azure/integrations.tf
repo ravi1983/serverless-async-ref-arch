@@ -92,3 +92,8 @@ resource "azurerm_communication_service" "acs" {
   resource_group_name = azurerm_resource_group.serverless_rg.name
   data_location       = "United States"
 }
+
+resource "azurerm_communication_service_email_domain_association" "link" {
+  communication_service_id = azurerm_communication_service.acs.id
+  email_service_domain_id  = azapi_resource.managed_domain.id
+}

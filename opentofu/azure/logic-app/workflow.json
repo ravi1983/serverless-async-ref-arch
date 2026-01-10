@@ -110,9 +110,10 @@
           }
         }
       },
-      "Send_ACS_Email": {
+      "Send_email": {
+        "runAfter": {
+          "Create_Summary_Blob": [ "Succeeded"] },
         "type": "ApiConnection",
-        "runAfter": { "Create_Summary_Blob": ["Succeeded"] },
         "inputs": {
           "host": {
             "connection": {
@@ -120,17 +121,17 @@
             }
           },
           "method": "post",
-          "path": "/v2/Mail",
           "body": {
-            "senderAddress": "DoNotReply@test.com",
-            "subject": "AI Analysis: @{triggerBody()?['DisplayName']}",
-            "html": "<h3>Process Complete</h3><p>The document <b>@{triggerBody()?['DisplayName']}</b> has been analyzed.</p>",
-            "importance": "Normal",
-            "recipients": {
-              "to": [
-                { "address": "${email}", "displayName": "Recipient Name" }
-              ]
-            }
+            "senderAddress": "${from_email}",
+            "recipients": { "to": [ {"address": "${email}"} ] },
+            "content": {
+              "subject": "Document Analysis Complete"
+            },
+            "importance": "Normal"
+          },
+          "path": "/emails:sendGAVersion",
+          "queries": {
+            "api-version": "2023-03-31"
           }
         }
       }
@@ -146,6 +147,22 @@
           "connectionId": "/subscriptions/${sub_id}/resourceGroups/${rg}/providers/Microsoft.Web/connections/azureblob",
           "connectionName": "azureblob",
           "connectionProperties": { "authentication": { "type": "ManagedServiceIdentity" } }
+        },
+        "acsemail": {
+          "id": "/subscriptions/${sub_id}/providers/Microsoft.Web/locations/centralus/managedApis/acsemail",
+          "connectionId": "/subscriptions/${sub_id}/resourceGroups/${rg}/providers/Microsoft.Web/connections/acsemail",
+          "connectionName": "acsemail",
+          "connectionProperties": {}
+        },
+        "azureeventgrid": {
+          "id": "/subscriptions/${sub_id}/providers/Microsoft.Web/locations/centralus/managedApis/azureeventgrid",
+          "connectionId": "/subscriptions/${sub_id}/resourceGroups/${rg}/providers/Microsoft.Web/connections/azureeventgrid",
+          "connectionName": "azureeventgrid",
+          "connectionProperties": {
+            "authentication": {
+              "type": "ManagedServiceIdentity"
+            }
+          }
         }
       }
     }
