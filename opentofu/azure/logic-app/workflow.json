@@ -1,0 +1,153 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "triggers": {
+      "When_a_blob_is_added_or_modified": {
+        "recurrence": { "interval": 5, "frequency": "Minute" },
+        "splitOn": "@triggerBody()",
+        "type": "ApiConnection",
+        "inputs": {
+          "host": { "connection": { "name": "@parameters('$connections')['azureblob']['connectionId']" } },
+          "method": "get",
+          "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('srcdocs2026'))}/triggers/batch/onupdatedfile",
+          "queries": { "folderId": "uploads", "maxFileCount": 10, "checkBothCreatedAndModifiedDateTime": false }
+        }
+      }
+    },
+    "actions": {
+      "Initialize_OCR_Content": {
+        "type": "InitializeVariable",
+        "runAfter": {},
+        "inputs": {
+          "variables": [ { "name": "OcrText", "type": "string", "value": "" } ]
+        }
+      },
+      "Get_blob_content_(V2)": {
+        "type": "ApiConnection",
+        "runAfter": { "Initialize_OCR_Content": ["Succeeded"] },
+        "inputs": {
+          "host": { "connection": { "name": "@parameters('$connections')['azureblob']['connectionId']" } },
+          "method": "get",
+          "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('srcdocs2026'))}/files/@{encodeURIComponent(encodeURIComponent(triggerBody()?['Id']))}/content",
+          "queries": { "inferContentType": true }
+        }
+      },
+      "Analyze_Document_OCR": {
+        "type": "Http",
+        "runAfter": { "Get_blob_content_(V2)": ["Succeeded"] },
+        "inputs": {
+          "uri": "https://ocr-image-service-2026-v1.cognitiveservices.azure.com/formrecognizer/documentModels/prebuilt-layout:analyze?api-version=2023-07-31",
+          "method": "POST",
+          "headers": { "Content-Type": "application/octet-stream" },
+          "authentication": { "type": "ManagedServiceIdentity", "audience": "https://cognitiveservices.azure.com" },
+          "body": "@base64ToBinary(outputs('Get_blob_content_(V2)')?['body']['$content'])"
+        }
+      },
+      "Until_OCR_Finished": {
+        "type": "Until",
+        "expression": "@equals(outputs('Get_OCR_Results')?['body']?['status'], 'succeeded')",
+        "limit": { "count": 10, "timeout": "PT2M" },
+        "runAfter": { "Analyze_Document_OCR": ["Succeeded"] },
+        "actions": {
+          "Delay": {
+            "type": "Wait",
+            "inputs": { "interval": { "count": 2, "unit": "Second" } }
+          },
+          "Get_OCR_Results": {
+            "type": "Http",
+            "runAfter": { "Delay": ["Succeeded"] },
+            "inputs": {
+              "method": "GET",
+              "uri": "@outputs('Analyze_Document_OCR')['headers']?['Operation-Location']",
+              "authentication": { "type": "ManagedServiceIdentity", "audience": "https://cognitiveservices.azure.com" }
+            }
+          },
+          "Set_OCR_Variable": {
+            "type": "SetVariable",
+            "runAfter": { "Get_OCR_Results": ["Succeeded"] },
+            "inputs": {
+              "name": "OcrText",
+              "value": "@outputs('Get_OCR_Results')?['body']?['analyzeResult']?['content']"
+            }
+          }
+        }
+      },
+      "Invoke_AI_Function": {
+        "type": "Http",
+        "runAfter": { "Until_OCR_Finished": ["Succeeded"] },
+        "inputs": {
+          "method": "POST",
+          "uri": "https://func-parser-2026.azurewebsites.net/api/summarize",
+          "body": { "text": "@variables('OcrText')" },
+          "authentication": { "type": "ManagedServiceIdentity", "audience": "https://management.azure.com/" }
+        }
+      },
+      "Create_Summary_Blob": {
+        "runAfter": { "Invoke_AI_Function": ["Succeeded"]},
+        "type": "ApiConnection",
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['azureblob']['connectionId']"
+            }
+          },
+          "method": "post",
+          "body": "@outputs('Invoke_AI_Function')?['body']?['summary']",
+          "headers": {
+            "ReadFileMetadataFromServer": true
+          },
+          "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('destresults2026'))}/files",
+          "queries": {
+            "folderPath": "results",
+            "name": "@{triggerBody()?['DisplayName']}-summary.txt",
+            "queryParametersSingleEncoded": true
+          }
+        },
+        "runtimeConfiguration": {
+          "contentTransfer": {
+            "transferMode": "Chunked"
+          }
+        }
+      },
+      "Send_ACS_Email": {
+        "type": "ApiConnection",
+        "runAfter": { "Create_Summary_Blob": ["Succeeded"] },
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['acsemail']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/v2/Mail",
+          "body": {
+            "senderAddress": "DoNotReply@test.com",
+            "subject": "AI Analysis: @{triggerBody()?['DisplayName']}",
+            "html": "<h3>Process Complete</h3><p>The document <b>@{triggerBody()?['DisplayName']}</b> has been analyzed.</p>",
+            "importance": "Normal",
+            "recipients": {
+              "to": [
+                { "address": "${email}", "displayName": "Recipient Name" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "parameters": { "$connections": { "type": "Object", "defaultValue": {} } }
+  },
+  "parameters": {
+    "$connections": {
+      "type": "Object",
+      "value": {
+        "azureblob": {
+          "id": "/subscriptions/${sub_id}/providers/Microsoft.Web/locations/centralus/managedApis/azureblob",
+          "connectionId": "/subscriptions/${sub_id}/resourceGroups/${rg}/providers/Microsoft.Web/connections/azureblob",
+          "connectionName": "azureblob",
+          "connectionProperties": { "authentication": { "type": "ManagedServiceIdentity" } }
+        }
+      }
+    }
+  }
+}

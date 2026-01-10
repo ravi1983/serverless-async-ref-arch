@@ -1,0 +1,12 @@
+__pycache__
+.idea
+*.iml
+
+.terraform
+.terraform*
+.terraform.lock.hcl
+terraform.tfvars
+
+terraform.tfstate
+terraform.tfstate*
+terraform.tfstate.backup
