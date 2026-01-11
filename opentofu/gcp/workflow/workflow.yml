@@ -1,0 +1,76 @@
+main:
+  params: [event]
+  steps:
+    - init_variables:
+        assign:
+          - bucket: $${event.data.bucket}
+          - file_name: $${event.data.name}
+          - project_id: ${project_id}
+          - topic_name: ${topic_name}
+          - output_bucket: ${results_bucket}
+
+    - ocr_document:
+        call: googleapis.documentai.v1.projects.locations.processors.batchProcess
+        args:
+          name: ${processor_id}
+          body:
+            inputDocuments:
+              gcsDocuments:
+                documents:
+                  - gcsUri: $${"gs://" + bucket + "/" + file_name}
+                    mimeType: $${event.data.contentType}
+            documentOutputConfig:
+              gcsOutputConfig:
+                gcsUri: $${"gs://" + output_bucket + "/ocr_output/"}
+        result: ocr_operation
+    - wait_for_ocr:
+        call: sys.sleep
+        args:
+          seconds: 10
+    - check_ocr_status:
+        call: googleapis.documentai.v1.projects.locations.operations.get
+        args:
+          name: $${ocr_operation.name}
+        result: ocr_status
+    - is_ocr_done:
+        switch:
+          - condition: $${not(ocr_status.done)}
+            next: wait_for_ocr
+    - list_output_files:
+        call: googleapis.storage.v1.objects.list
+        args:
+          bucket: $${output_bucket}
+          prefix: $${"ocr_output/" + text.split(ocr_operation.name, "/")[5] + "/0/"}
+        result: file_list
+
+
+    - summarize_with_gemini:
+        call: googleapis.aiplatform.v1.projects.locations.endpoints.generateContent
+        args:
+          model: $${"projects/" + project_id + "/locations/us-central1/publishers/google/models/gemini-2.5-flash"}
+          region: "us-central1"
+          body:
+            contents:
+              role: user
+              parts:
+                - text: "Summarize this OCR data and find the sentiment."
+                - fileData:
+                    mimeType: "text/plain"
+                    fileUri: $${"gs://" + output_bucket + "/" + file_list.items[0].name}
+        result: ai_response
+
+    - save_to_storage:
+        call: googleapis.storage.v1.objects.insert
+        args:
+          bucket: ${results_bucket}
+          name: $${"result-" + file_name + ".json"}
+          body:
+            summary: $${ai_response.candidates[0].content.parts[0].text}
+
+    - notify_pubsub:
+        call: googleapis.pubsub.v1.projects.topics.publish
+        args:
+          topic: $${"projects/" + project_id + "/topics/" + topic_name}
+          body:
+            messages:
+              - data: $${base64.encode(text.encode("Processing complete for " + file_name))}

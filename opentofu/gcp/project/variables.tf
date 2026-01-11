@@ -1,0 +1,1 @@
+variable "BILLING_ACCOUNT" {}
