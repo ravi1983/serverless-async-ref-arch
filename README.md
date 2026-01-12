@@ -55,7 +55,7 @@ Demonstrating direct service integration (Direct HTTP/Connector) from the workfl
 ## Infrastructure and CI/CD
 
 * **Infrastructure as Code (IaC):** Powered by **OpenTofu**. This ensures consistent resource provisioning across providers.
-* **CI/CD:** **GitHub Actions** workflows are used to validate OpenTofu plans and deploy infrastructure updates automatically upon code changes.
+* **CI/CD:** **GitHub Actions** are used to deploy the function code.
 
 ---
 
